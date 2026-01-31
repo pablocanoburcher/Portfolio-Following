@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication Style: NCD (No-Code-Developer Mode)
+
+When the user mentions "NCD" or asks for explanations, always explain in a **no-code-developer friendly way**:
+
+- **Avoid jargon**: Replace technical terms with simple analogies
+- **Use everyday examples**: Compare code concepts to real-world things (e.g., "an API is like a waiter taking your order to the kitchen")
+- **Step-by-step**: Break down processes into simple numbered steps
+- **What, not how**: Focus on what things DO, not how they work internally
+- **Visual language**: Use analogies like "think of it as a box that holds...", "it's like a recipe that..."
+- **No assumed knowledge**: Don't assume familiarity with programming concepts
+
+**Example NCD explanation:**
+> "The cooldown timer is like a microwave timer - after you heat something up (generate reports), you have to wait 5 minutes before you can use it again. This prevents the system from getting overwhelmed."
+
 ## Build Commands
 
 ```bash
