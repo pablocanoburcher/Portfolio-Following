@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ASSETS } from '@/types/assets';
-import { getReports } from '@/lib/reportStore';
 import { formatReportForPDF, generatePDFHTML } from '@/lib/pdfGenerator';
+import { AssetReport } from '@/types/assets';
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const symbol = searchParams.get('symbol');
+    const body = await request.json();
+    const { symbol, report } = body as { symbol: string; report: AssetReport };
 
     if (!symbol) {
       return NextResponse.json(
@@ -18,24 +18,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    if (!report) {
+      return NextResponse.json(
+        { success: false, error: 'Report data is required' },
+        { status: 400 }
+      );
+    }
+
     const asset = ASSETS.find(a => a.symbol === symbol);
     if (!asset) {
       return NextResponse.json(
         { success: false, error: 'Asset not found' },
-        { status: 404 }
-      );
-    }
-
-    // Use cached report to ensure consistency with displayed data
-    const cachedReports = getReports();
-    console.log(`PDF route: Found ${cachedReports.length} cached reports for symbol ${symbol}`);
-
-    const report = cachedReports.find(r => r.symbol === symbol);
-
-    if (!report) {
-      console.log(`PDF route: Report not found for ${symbol}. Available symbols:`, cachedReports.map(r => r.symbol));
-      return NextResponse.json(
-        { success: false, error: 'Report not found. Please generate reports first.' },
         { status: 404 }
       );
     }

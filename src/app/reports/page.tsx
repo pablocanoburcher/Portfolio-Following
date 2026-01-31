@@ -68,16 +68,24 @@ export default function ReportsPage() {
     }
   };
 
-  const handleDownloadPDF = async (symbol: string) => {
+  const handleDownloadPDF = async (symbol: string, report: AssetReport) => {
     try {
-      const response = await fetch(`/api/reports/pdf?symbol=${symbol}`);
+      // Send the report data to the PDF endpoint
+      const response = await fetch('/api/reports/pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ symbol, report }),
+      });
+
       if (!response.ok) throw new Error('Failed to generate PDF');
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${symbol}_report_${new Date().toISOString().split('T')[0]}.pdf`;
+      a.download = `${symbol}_report_${new Date().toISOString().split('T')[0]}.html`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -151,7 +159,7 @@ export default function ReportsPage() {
                     key={report.symbol}
                     report={report}
                     asset={asset}
-                    onDownloadPDF={() => handleDownloadPDF(report.symbol)}
+                    onDownloadPDF={() => handleDownloadPDF(report.symbol, report)}
                   />
                 );
               })}
