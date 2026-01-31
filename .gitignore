@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Report cache (persistent storage for cooldown)
+.report-cache/
+
 # Next.js build output
 .next/
 out/
