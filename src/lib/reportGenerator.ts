@@ -1,54 +1,157 @@
 import { Asset, AssetReport } from '@/types/assets';
 
-// Mock price data generator (in production, this would fetch from real APIs)
-function generateMockPriceData(asset: Asset): { currentPrice: number; priceChange24h: number; priceChangePercent24h: number } {
-  const basePrices: Record<string, number> = {
-    'TSLA': 248.50,
-    'ASML': 715.30,
-    'OKLO': 28.45,
-    'COIN': 225.80,
-    'CRCL': 12.35,
-    'ETHUSD': 3250.00,
-    'BTCUSD': 98500.00,
-    'XAUUSD': 2650.00,
-    'XAGUSD': 31.50,
-    'US10Y': 4.28
-  };
+// Yahoo Finance symbol mapping
+const YAHOO_SYMBOLS: Record<string, string> = {
+  'TSLA': 'TSLA',
+  'ASML': 'ASML',
+  'OKLO': 'OKLO',
+  'COIN': 'COIN',
+  'CRCL': 'CRCL',
+  'ETHUSD': 'ETH-USD',
+  'BTCUSD': 'BTC-USD',
+  'XAUUSD': 'GC=F',
+  'XAGUSD': 'SI=F',
+  'US10Y': '^TNX'
+};
 
-  const basePrice = basePrices[asset.symbol] || 100;
-  const volatility = asset.type === 'crypto' ? 0.05 : 0.02;
-  const randomChange = (Math.random() - 0.5) * 2 * volatility;
-  const priceChange24h = basePrice * randomChange;
+// Fallback prices (used only if API fails)
+const FALLBACK_PRICES: Record<string, number> = {
+  'TSLA': 248.50,
+  'ASML': 715.30,
+  'OKLO': 28.45,
+  'COIN': 225.80,
+  'CRCL': 12.35,
+  'ETHUSD': 3250.00,
+  'BTCUSD': 98500.00,
+  'XAUUSD': 2650.00,
+  'XAGUSD': 31.50,
+  'US10Y': 4.28
+};
 
+interface PriceResult {
+  currentPrice: number;
+  priceChange24h: number;
+  priceChangePercent24h: number;
+  isRealData: boolean;
+}
+
+// Fetch real price data from Yahoo Finance
+async function fetchRealPriceData(asset: Asset): Promise<PriceResult> {
+  const yahooSymbol = YAHOO_SYMBOLS[asset.symbol];
+
+  if (!yahooSymbol) {
+    return getFallbackPrice(asset);
+  }
+
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=2d`;
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      next: { revalidate: 300 } // Cache for 5 minutes
+    });
+
+    if (!response.ok) {
+      console.warn(`Yahoo Finance API returned ${response.status} for ${asset.symbol}`);
+      return getFallbackPrice(asset);
+    }
+
+    const data = await response.json();
+
+    const result = data.chart?.result?.[0];
+    if (!result) {
+      console.warn(`No data returned for ${asset.symbol}`);
+      return getFallbackPrice(asset);
+    }
+
+    const meta = result.meta;
+    const quotes = result.indicators?.quote?.[0];
+
+    const currentPrice = meta.regularMarketPrice || meta.previousClose;
+    const previousClose = meta.chartPreviousClose || meta.previousClose;
+
+    // Calculate 24h change
+    let priceChange24h = 0;
+    let priceChangePercent24h = 0;
+
+    if (currentPrice && previousClose) {
+      priceChange24h = currentPrice - previousClose;
+      priceChangePercent24h = (priceChange24h / previousClose) * 100;
+    } else if (quotes && quotes.close && quotes.close.length >= 2) {
+      // Fallback to chart data
+      const closes = quotes.close.filter((c: number | null) => c !== null);
+      if (closes.length >= 2) {
+        const latest = closes[closes.length - 1];
+        const previous = closes[closes.length - 2];
+        priceChange24h = latest - previous;
+        priceChangePercent24h = (priceChange24h / previous) * 100;
+      }
+    }
+
+    return {
+      currentPrice: currentPrice || FALLBACK_PRICES[asset.symbol] || 100,
+      priceChange24h,
+      priceChangePercent24h,
+      isRealData: true
+    };
+  } catch (error) {
+    console.error(`Error fetching price for ${asset.symbol}:`, error);
+    return getFallbackPrice(asset);
+  }
+}
+
+function getFallbackPrice(asset: Asset): PriceResult {
+  const basePrice = FALLBACK_PRICES[asset.symbol] || 100;
   return {
-    currentPrice: basePrice + priceChange24h,
-    priceChange24h: priceChange24h,
-    priceChangePercent24h: randomChange * 100
+    currentPrice: basePrice,
+    priceChange24h: 0,
+    priceChangePercent24h: 0,
+    isRealData: false
   };
 }
 
+// Determine sentiment based on actual price movement
+function determineSentiment(priceChangePercent: number): 'bullish' | 'bearish' | 'neutral' {
+  // Use price movement to determine sentiment
+  // Strong movements (> 2%) get directional sentiment
+  // Moderate movements (0.5% - 2%) are more neutral-leaning
+  // Small movements (< 0.5%) are neutral
+
+  if (priceChangePercent > 2) return 'bullish';
+  if (priceChangePercent < -2) return 'bearish';
+  if (priceChangePercent > 0.5) return 'bullish';
+  if (priceChangePercent < -0.5) return 'bearish';
+  return 'neutral';
+}
+
 // Generate analysis text based on asset type and sentiment
-function generateAnalysis(asset: Asset, sentiment: 'bullish' | 'bearish' | 'neutral'): string {
+function generateAnalysis(asset: Asset, sentiment: 'bullish' | 'bearish' | 'neutral', priceChange: number): string {
+  const direction = priceChange >= 0 ? 'up' : 'down';
+  const magnitude = Math.abs(priceChange);
+  const magnitudeDesc = magnitude > 3 ? 'significantly' : magnitude > 1 ? 'moderately' : 'slightly';
+
   const analyses: Record<string, Record<string, string>> = {
     stock: {
-      bullish: `${asset.name} shows strong momentum with increasing institutional interest. Technical indicators suggest continued upward movement, supported by positive earnings outlook and sector tailwinds.`,
-      bearish: `${asset.name} faces headwinds from macro conditions and sector rotation. Technical patterns suggest potential consolidation or downside, with key support levels being tested.`,
-      neutral: `${asset.name} is trading in a consolidation range with mixed signals. Market participants await key catalysts before committing to directional moves.`
+      bullish: `${asset.name} is trading ${magnitudeDesc} higher, showing positive momentum. Technical indicators suggest continued upward pressure, supported by market sentiment and sector performance.`,
+      bearish: `${asset.name} is trading ${magnitudeDesc} lower, facing headwinds from current market conditions. Key support levels are being monitored as the stock consolidates.`,
+      neutral: `${asset.name} is trading in a tight range with balanced buying and selling pressure. Market participants are awaiting key catalysts before committing to directional moves.`
     },
     crypto: {
-      bullish: `${asset.name} demonstrates strong on-chain metrics with increasing network activity and whale accumulation. Institutional flows remain positive, supporting price appreciation.`,
-      bearish: `${asset.name} shows weakening momentum with declining network activity. Exchange outflows have slowed, and short-term holder behavior suggests distribution phase.`,
-      neutral: `${asset.name} consolidates within established range as market digests recent moves. On-chain metrics show balanced accumulation and distribution patterns.`
+      bullish: `${asset.name} demonstrates positive momentum with the price moving ${magnitudeDesc} higher. On-chain metrics and trading volume support the current price action.`,
+      bearish: `${asset.name} is experiencing ${magnitudeDesc} downward pressure. Market participants are watching key support levels and on-chain activity for signs of stabilization.`,
+      neutral: `${asset.name} consolidates within established range as the market digests recent moves. Trading activity shows balanced accumulation and distribution patterns.`
     },
     commodity: {
-      bullish: `${asset.name} benefits from safe-haven demand and central bank buying. Supply constraints and geopolitical factors support continued price strength.`,
-      bearish: `${asset.name} faces pressure from rising real yields and dollar strength. ETF outflows indicate shifting investor sentiment toward risk assets.`,
-      neutral: `${asset.name} trades sideways as competing forces balance. Safe-haven demand offsets pressure from monetary policy normalization.`
+      bullish: `${asset.name} is trending ${magnitudeDesc} higher, benefiting from current market dynamics. Safe-haven demand and macroeconomic factors support continued price strength.`,
+      bearish: `${asset.name} faces ${magnitudeDesc} pressure from current market conditions. Investors are monitoring global economic indicators and central bank policies.`,
+      neutral: `${asset.name} trades sideways as competing forces balance. Global economic uncertainty and monetary policy expectations continue to influence price action.`
     },
     bond: {
-      bullish: `Treasury yields are trending higher as markets price in sustained economic growth and potential inflation concerns. Duration risk remains elevated.`,
-      bearish: `Treasury yields face downward pressure as flight-to-safety flows increase. Economic uncertainty supports bond demand and lower yields.`,
-      neutral: `Treasury yields consolidate as markets assess Fed policy trajectory. Inflation data and employment figures remain key drivers.`
+      bullish: `Treasury yields are moving ${magnitudeDesc} higher as markets assess economic growth and inflation expectations. Duration positioning remains a key consideration.`,
+      bearish: `Treasury yields are trending ${magnitudeDesc} lower as flight-to-safety flows increase. Economic uncertainty supports demand for government bonds.`,
+      neutral: `Treasury yields consolidate as markets evaluate Fed policy trajectory. Inflation data and employment figures remain key drivers for rate expectations.`
     }
   };
 
@@ -57,19 +160,16 @@ function generateAnalysis(asset: Asset, sentiment: 'bullish' | 'bearish' | 'neut
 
 // Generate prediction based on asset and sentiment
 function generatePrediction(asset: Asset, sentiment: 'bullish' | 'bearish' | 'neutral'): string {
-  const timeframes = ['short-term', 'medium-term'];
-  const timeframe = timeframes[Math.floor(Math.random() * timeframes.length)];
-
   const predictions: Record<string, string> = {
-    bullish: `${timeframe.charAt(0).toUpperCase() + timeframe.slice(1)} outlook remains constructive with potential upside of 10-15% if current momentum continues. Key resistance levels to watch for breakout confirmation.`,
-    bearish: `${timeframe.charAt(0).toUpperCase() + timeframe.slice(1)} outlook suggests caution with potential downside of 8-12%. Support levels may be tested before stabilization.`,
-    neutral: `${timeframe.charAt(0).toUpperCase() + timeframe.slice(1)} outlook indicates range-bound trading. Position sizing should reflect elevated uncertainty until clearer directional signals emerge.`
+    bullish: `Near-term outlook remains constructive. If current momentum continues, potential upside of 5-10% is possible. Key resistance levels should be monitored for breakout confirmation.`,
+    bearish: `Near-term outlook suggests caution. Potential downside of 5-8% may occur if support levels break. Risk management and position sizing are recommended.`,
+    neutral: `Near-term outlook indicates range-bound trading. Position sizing should reflect current uncertainty until clearer directional signals emerge from the market.`
   };
 
   return predictions[sentiment];
 }
 
-// Generate key factors
+// Generate key factors based on asset type
 function generateKeyFactors(asset: Asset): string[] {
   const factorSets: Record<string, string[]> = {
     stock: [
@@ -102,19 +202,11 @@ function generateKeyFactors(asset: Asset): string[] {
     ]
   };
 
-  const factors = factorSets[asset.type] || [];
-  return factors.slice(0, 4 + Math.floor(Math.random() * 2));
+  // Return consistent factors (not randomized)
+  return factorSets[asset.type] || [];
 }
 
-// Determine sentiment based on random factors (in production, this would be AI-driven)
-function determineSentiment(): 'bullish' | 'bearish' | 'neutral' {
-  const rand = Math.random();
-  if (rand < 0.4) return 'bullish';
-  if (rand < 0.7) return 'neutral';
-  return 'bearish';
-}
-
-// Determine risk level
+// Determine risk level based on asset type
 function determineRiskLevel(asset: Asset): 'low' | 'medium' | 'high' {
   const riskMap: Record<string, 'low' | 'medium' | 'high'> = {
     stock: 'medium',
@@ -125,9 +217,9 @@ function determineRiskLevel(asset: Asset): 'low' | 'medium' | 'high' {
   return riskMap[asset.type] || 'medium';
 }
 
-export function generateReport(asset: Asset): AssetReport {
-  const priceData = generateMockPriceData(asset);
-  const sentiment = determineSentiment();
+export async function generateReport(asset: Asset): Promise<AssetReport> {
+  const priceData = await fetchRealPriceData(asset);
+  const sentiment = determineSentiment(priceData.priceChangePercent24h);
 
   return {
     symbol: asset.symbol,
@@ -135,7 +227,7 @@ export function generateReport(asset: Asset): AssetReport {
     currentPrice: priceData.currentPrice,
     priceChange24h: priceData.priceChange24h,
     priceChangePercent24h: priceData.priceChangePercent24h,
-    analysis: generateAnalysis(asset, sentiment),
+    analysis: generateAnalysis(asset, sentiment, priceData.priceChangePercent24h),
     prediction: generatePrediction(asset, sentiment),
     sentiment,
     keyFactors: generateKeyFactors(asset),
@@ -143,6 +235,8 @@ export function generateReport(asset: Asset): AssetReport {
   };
 }
 
-export function generateAllReports(assets: Asset[]): AssetReport[] {
-  return assets.map(asset => generateReport(asset));
+export async function generateAllReports(assets: Asset[]): Promise<AssetReport[]> {
+  // Fetch all reports in parallel
+  const reportPromises = assets.map(asset => generateReport(asset));
+  return Promise.all(reportPromises);
 }

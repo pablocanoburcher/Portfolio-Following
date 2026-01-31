@@ -1,26 +1,41 @@
 import { NextResponse } from 'next/server';
-import { ASSETS, AssetReport } from '@/types/assets';
+import { ASSETS } from '@/types/assets';
 import { generateAllReports } from '@/lib/reportGenerator';
-
-// Shared storage with main reports route
-let cachedReports: AssetReport[] = [];
+import {
+  getReports,
+  setReports,
+  canGenerateReports,
+  getCooldownRemainingMs,
+  getCooldownDurationMs
+} from '@/lib/reportStore';
 
 export async function POST() {
   try {
-    // Generate fresh reports for all assets
-    cachedReports = generateAllReports(ASSETS);
+    // Check if cooldown period has elapsed
+    if (!canGenerateReports()) {
+      const remainingMs = getCooldownRemainingMs();
+      const remainingMinutes = Math.ceil(remainingMs / 60000);
 
-    // In production, you would:
-    // 1. Fetch real-time price data from APIs (Alpha Vantage, CoinGecko, etc.)
-    // 2. Call Claude/OpenAI API to generate AI-powered analysis
-    // 3. Store reports in a database
-    // 4. Optionally trigger email notifications if enabled
+      return NextResponse.json({
+        success: false,
+        error: `Reports can only be updated every 5 minutes. Please wait ${remainingMinutes} minute(s).`,
+        reports: getReports(),
+        cooldownRemainingMs: remainingMs,
+        cooldownDurationMs: getCooldownDurationMs()
+      }, { status: 429 });
+    }
+
+    // Generate fresh reports for all assets using real price data
+    const newReports = await generateAllReports(ASSETS);
+    setReports(newReports);
 
     return NextResponse.json({
       success: true,
-      reports: cachedReports,
+      reports: newReports,
       generatedAt: new Date().toISOString(),
-      message: 'Reports generated successfully'
+      message: 'Reports generated successfully with real-time market data',
+      cooldownRemainingMs: getCooldownRemainingMs(),
+      cooldownDurationMs: getCooldownDurationMs()
     });
   } catch (error) {
     console.error('Error generating reports:', error);

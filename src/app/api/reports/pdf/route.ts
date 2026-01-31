@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ASSETS } from '@/types/assets';
-import { generateReport } from '@/lib/reportGenerator';
+import { getReports } from '@/lib/reportStore';
 import { formatReportForPDF, generatePDFHTML } from '@/lib/pdfGenerator';
 
 export async function GET(request: NextRequest) {
@@ -23,8 +23,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Generate fresh report for the asset
-    const report = generateReport(asset);
+    // Use cached report to ensure consistency with displayed data
+    const cachedReports = getReports();
+    const report = cachedReports.find(r => r.symbol === symbol);
+
+    if (!report) {
+      return NextResponse.json(
+        { success: false, error: 'Report not found. Please generate reports first.' },
+        { status: 404 }
+      );
+    }
+
     const pdfData = formatReportForPDF(report, asset);
     const htmlContent = generatePDFHTML(pdfData);
 

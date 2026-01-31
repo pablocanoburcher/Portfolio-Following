@@ -13,6 +13,8 @@ export default function ReportsPage() {
   const [reports, setReports] = useState<AssetReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0);
+  const [cooldownDurationMs, setCooldownDurationMs] = useState(5 * 60 * 1000);
 
   // Load reports on mount
   useEffect(() => {
@@ -27,6 +29,8 @@ export default function ReportsPage() {
       if (!response.ok) throw new Error('Failed to load reports');
       const data = await response.json();
       setReports(data.reports || []);
+      setCooldownRemainingMs(data.cooldownRemainingMs || 0);
+      setCooldownDurationMs(data.cooldownDurationMs || 5 * 60 * 1000);
     } catch (err) {
       setError('Failed to load reports. Please try again.');
       console.error(err);
@@ -41,11 +45,25 @@ export default function ReportsPage() {
       const response = await fetch('/api/reports/generate', {
         method: 'POST',
       });
-      if (!response.ok) throw new Error('Failed to generate reports');
+
       const data = await response.json();
+
+      // Update cooldown state
+      setCooldownRemainingMs(data.cooldownRemainingMs || 0);
+      setCooldownDurationMs(data.cooldownDurationMs || 5 * 60 * 1000);
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          // Rate limited - show error but don't throw
+          setError(data.error || 'Please wait before generating new reports.');
+          return;
+        }
+        throw new Error(data.error || 'Failed to generate reports');
+      }
+
       setReports(data.reports || []);
     } catch (err) {
-      setError('Failed to generate reports. Please check your API configuration.');
+      setError('Failed to generate reports. Please check your connection and try again.');
       console.error(err);
     }
   };
@@ -88,7 +106,11 @@ export default function ReportsPage() {
                 AI-powered analysis and predictions for your tracked assets
               </p>
             </div>
-            <UpdateReportsButton onUpdate={handleUpdateReports} />
+            <UpdateReportsButton
+              onUpdate={handleUpdateReports}
+              cooldownRemainingMs={cooldownRemainingMs}
+              cooldownDurationMs={cooldownDurationMs}
+            />
           </div>
 
           {/* Error Message */}
@@ -141,7 +163,7 @@ export default function ReportsPage() {
       {/* Footer */}
       <footer className="border-t border-dark-800 py-6 px-4">
         <div className="max-w-7xl mx-auto text-center text-dark-500 text-sm">
-          <p>Reports are generated using AI analysis based on current market data.</p>
+          <p>Reports are generated using real-time market data from financial APIs.</p>
           <p className="mt-1">
             This is not financial advice. Always do your own research before investing.
           </p>

@@ -1,21 +1,33 @@
 import { NextResponse } from 'next/server';
-import { ASSETS, AssetReport } from '@/types/assets';
+import { ASSETS } from '@/types/assets';
 import { generateAllReports } from '@/lib/reportGenerator';
+import {
+  getReports,
+  setReports,
+  getLastGeneratedAt,
+  getCooldownRemainingMs,
+  getCooldownDurationMs
+} from '@/lib/reportStore';
 
-// In-memory storage for reports (in production, use a database)
-let cachedReports: AssetReport[] = [];
+// Force dynamic rendering for real-time price data
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
+    let reports = getReports();
+
     // If no cached reports, generate initial set
-    if (cachedReports.length === 0) {
-      cachedReports = generateAllReports(ASSETS);
+    if (reports.length === 0) {
+      reports = await generateAllReports(ASSETS);
+      setReports(reports);
     }
 
     return NextResponse.json({
       success: true,
-      reports: cachedReports,
-      lastUpdated: cachedReports[0]?.generatedAt || null
+      reports: reports,
+      lastUpdated: getLastGeneratedAt(),
+      cooldownRemainingMs: getCooldownRemainingMs(),
+      cooldownDurationMs: getCooldownDurationMs()
     });
   } catch (error) {
     console.error('Error fetching reports:', error);
