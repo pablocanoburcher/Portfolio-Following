@@ -50,10 +50,11 @@ src/
 │   ├── AssetCard.tsx      # Chart card with interval selector
 │   ├── TradingViewChart.tsx  # TradingView widget embed
 │   ├── ReportCard.tsx     # Financial report display
-│   ├── UpdateReportsButton.tsx
+│   ├── UpdateReportsButton.tsx  # Update button with cooldown timer
 │   └── NotificationModal.tsx
 ├── lib/
-│   ├── reportGenerator.ts # Report generation logic
+│   ├── reportGenerator.ts # Report generation with Yahoo Finance API
+│   ├── reportStore.ts     # File-based report cache & cooldown management
 │   └── pdfGenerator.ts    # PDF/HTML export utilities
 └── types/
     └── assets.ts          # Asset definitions, TimeInterval types
@@ -65,18 +66,45 @@ src/
 
 - **Time Intervals**: 8 intervals (24h, 7d, 1w, 1m, 6m, 1y, 5y, all) mapped to TradingView ranges in `TradingViewChart.tsx:getTradingViewInterval()`.
 
-- **Report Generation**: `src/lib/reportGenerator.ts` generates mock reports. For production, integrate real APIs in `generateMockPriceData()` and call Claude/OpenAI in `generateAnalysis()`.
+- **Report Generation**: `src/lib/reportGenerator.ts` fetches real-time price data from Yahoo Finance API. Falls back to static prices if API is unavailable. Sentiment is determined by actual price movement (not random).
 
-- **State Management**: Local React state. Notification settings persist to localStorage.
+- **Report Caching & Cooldown**: `src/lib/reportStore.ts` provides file-based persistence (`.report-cache/reports.json`) for reports and enforces a 5-minute cooldown between updates. This prevents rapid regeneration and ensures price stability.
+
+- **State Management**: Local React state. Notification settings persist to localStorage. Report cache persists to filesystem.
+
+## Report System
+
+### How Reports Work
+
+1. **Price Data**: Fetched from Yahoo Finance API (`query1.finance.yahoo.com`)
+   - Stocks: Direct symbols (TSLA, ASML, etc.)
+   - Crypto: ETH-USD, BTC-USD
+   - Commodities: GC=F (Gold futures), SI=F (Silver futures)
+   - Bonds: ^TNX (10-Year Treasury)
+
+2. **Cooldown**: 5-minute minimum between report generations to account for market volatility and prevent excessive API calls.
+
+3. **Sentiment**: Based on 24h price change:
+   - > 2% or > 0.5%: Bullish
+   - < -2% or < -0.5%: Bearish
+   - Otherwise: Neutral
+
+4. **Risk Level**: Static per asset type (Stock: medium, Crypto: high, Commodity: medium, Bond: low)
+
+5. **PDF Export**: Returns styled HTML that can be printed to PDF. Uses cached reports for consistency.
+
+### Cache Location
+
+Reports are cached in `.report-cache/reports.json` (gitignored). Delete this file to reset the cache and cooldown.
 
 ## Environment Variables
 
 Copy `.env.example` to `.env.local`:
 
 ```bash
-ALPHA_VANTAGE_API_KEY=     # Stock data
-COINMARKETCAP_API_KEY=     # Crypto data
-ANTHROPIC_API_KEY=         # AI report generation
+ALPHA_VANTAGE_API_KEY=     # Stock data (optional, Yahoo Finance used by default)
+COINMARKETCAP_API_KEY=     # Crypto data (optional)
+ANTHROPIC_API_KEY=         # AI report generation (for future enhancement)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=                 # Gmail for sending
@@ -86,12 +114,10 @@ NOTIFICATION_EMAIL=        # Recipient
 
 ## Production Enhancements
 
-The current implementation uses mock data. For production:
+1. **AI Reports**: Replace template-based analysis in `generateAnalysis()` with Claude API calls using `@anthropic-ai/sdk` for more dynamic insights.
 
-1. **Real Price Data**: Replace `generateMockPriceData()` in `reportGenerator.ts` with API calls to Alpha Vantage, CoinGecko, etc.
+2. **PDF Export**: The current PDF route returns styled HTML. For true PDF, add Puppeteer or use a PDF service.
 
-2. **AI Reports**: Replace mock analysis in `generateAnalysis()` with Claude API calls using `@anthropic-ai/sdk`.
+3. **Email Notifications**: Implement nodemailer in `api/notifications/route.ts` with news monitoring service.
 
-3. **PDF Export**: The current PDF route returns styled HTML. For true PDF, add Puppeteer or use a PDF service.
-
-4. **Email Notifications**: Implement nodemailer in `api/notifications/route.ts` with news monitoring service.
+4. **Database**: For multi-user support, replace file-based `reportStore.ts` with a proper database (PostgreSQL, MongoDB, etc.).
