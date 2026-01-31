@@ -3,6 +3,9 @@ import { ASSETS } from '@/types/assets';
 import { getReports } from '@/lib/reportStore';
 import { formatReportForPDF, generatePDFHTML } from '@/lib/pdfGenerator';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -25,9 +28,12 @@ export async function GET(request: NextRequest) {
 
     // Use cached report to ensure consistency with displayed data
     const cachedReports = getReports();
+    console.log(`PDF route: Found ${cachedReports.length} cached reports for symbol ${symbol}`);
+
     const report = cachedReports.find(r => r.symbol === symbol);
 
     if (!report) {
+      console.log(`PDF route: Report not found for ${symbol}. Available symbols:`, cachedReports.map(r => r.symbol));
       return NextResponse.json(
         { success: false, error: 'Report not found. Please generate reports first.' },
         { status: 404 }
@@ -38,10 +44,10 @@ export async function GET(request: NextRequest) {
     const htmlContent = generatePDFHTML(pdfData);
 
     // Return HTML that can be printed to PDF
-    // In production, you would use Puppeteer or similar to convert to actual PDF
     return new NextResponse(htmlContent, {
+      status: 200,
       headers: {
-        'Content-Type': 'text/html',
+        'Content-Type': 'text/html; charset=utf-8',
         'Content-Disposition': `attachment; filename="${symbol}_report.html"`,
       },
     });
